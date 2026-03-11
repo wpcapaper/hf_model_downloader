@@ -5,12 +5,14 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import Settings
+from .env import apply_hf_env
 
 app = typer.Typer(
     name="hfmdl",
     help="HuggingFace Model Downloader - Download and manage HuggingFace models",
 )
 console = Console()
+
 
 
 @app.command()
@@ -46,12 +48,18 @@ def show_config(
     endpoint: str | None = typer.Option(
         None, "--endpoint", "-e", help="Override endpoint URL"
     ),
+    force_endpoint: bool = typer.Option(
+        False, "--force-endpoint", "-f", help="Force config endpoint, ignore HF_ENDPOINT env var"
+    ),
 ) -> None:
     """Show current configuration."""
     settings = Settings.load()
     if endpoint:
         settings = settings.merge_cli_overrides(endpoint=endpoint)
     config_path = Settings.get_config_path()
+
+    # Apply environment variables before any HF operations
+    effective_env = apply_hf_env(settings, force_endpoint=force_endpoint)
 
     console.print(f"[blue]Config file:[/] {config_path}")
     console.print()
@@ -61,7 +69,8 @@ def show_config(
     table.add_column("Setting", style="cyan")
     table.add_column("Value", style="green")
 
-    table.add_row("Endpoint", settings.endpoint)
+    # Show effective endpoint from environment (respects HF_ENDPOINT)
+    table.add_row("Endpoint", effective_env.get("HF_ENDPOINT", settings.endpoint))
     table.add_row("Download Timeout", str(settings.hf_hub_download_timeout))
     table.add_row("ETag Timeout", str(settings.hf_hub_etag_timeout))
     table.add_row("High Performance Mode", str(settings.hf_xet_high_performance))
