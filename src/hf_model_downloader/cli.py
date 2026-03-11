@@ -569,6 +569,9 @@ def validate(
             "Visit the repository page to request access.[/]"
         )
         raise typer.Exit(code=EXIT_NON_RETRIABLE_ERROR)
+    except typer.Exit:
+        # Re-raise typer.Exit to allow normal exit handling
+        raise
     except Exception as e:
         console.print(f"[red]✗ Validation failed:[/] {e}")
         raise typer.Exit(code=EXIT_NON_RETRIABLE_ERROR)
