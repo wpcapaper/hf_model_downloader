@@ -1,11 +1,15 @@
-"""CLI interface for hf_model_downloader using Typer."""
+#VS|"""CLI interface for hf_model_downloader using Typer."""
+
+from __future__ import annotations
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from .config import Settings
+from .config import Settings, load_settings
+from .downloader import download_snapshot
 from .env import apply_hf_env
+from .errors import DownloadError
 
 app = typer.Typer(
     name="hfmdl",
@@ -14,6 +18,31 @@ app = typer.Typer(
 console = Console()
 
 
+# Version info
+__version__ = "0.1.0"
+
+
+def _version_callback(value: bool) -> None:
+    """Callback to show version and exit."""
+    if value:
+        console.print(f"[blue]hfmdl[/] version [green]{__version__}[/]")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-v",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show version and exit",
+    ),
+) -> None:
+    """HuggingFace Model Downloader - Download and manage HuggingFace models."""
+    pass
+
 
 @app.command()
 def download(
@@ -21,19 +50,66 @@ def download(
         ..., help="HuggingFace model ID (e.g., 'bert-base-uncased')"
     ),
     profile: str | None = typer.Option(
-        None, "--profile", "-p", help="Configuration profile to use"
+        None, "--profile", "-p", help="Configuration profile to use (future feature)"
     ),
-    output_dir: str | None = typer.Option(None, "--output", "-o", help="Output directory"),
+    output_dir: str | None = typer.Option(
+        None, "--output", "-o", help="Output/cache directory"
+    ),
+    revision: str = typer.Option(
+        "main", "--revision", "-r", help="Model revision/branch/tag"
+    ),
+    repo_type: str = typer.Option(
+        "model", "--repo-type", "-t", help="Repository type: model, dataset, or space"
+    ),
+    force_download: bool = typer.Option(
+        False, "--force-download", "-f", help="Force re-download even if cached"
+    ),
+    force_endpoint: bool = typer.Option(
+        False,
+        "--force-endpoint",
+        "-e",
+        help="Force config endpoint, ignore HF_ENDPOINT env var",
+    ),
+    endpoint: str | None = typer.Option(
+        None, "--endpoint", help="Override endpoint URL"
+    ),
+    token: str | None = typer.Option(
+        None, "--token", help="HuggingFace API token (default: HF_TOKEN env var)"
+    ),
 ) -> None:
     """Download a model from HuggingFace."""
     console.print(f"[blue]Downloading model:[/] {model_id}")
-    if profile:
-        console.print(f"[dim]Using profile: {profile}[/]")
-    if output_dir:
-        console.print(f"[dim]Output directory: {output_dir}[/]")
-    # TODO: Implement actual download logic
-    console.print("[yellow]Download functionality not yet implemented[/]")
+    console.print(f"[dim]Revision: {revision}[/]")
+    console.print(f"[dim]Repo type: {repo_type}[/]")
 
+    if profile:
+        console.print(f"[dim]Profile: {profile} (not yet implemented)[/]")
+
+    # Load settings with CLI overrides
+    settings = load_settings(
+        endpoint=endpoint,
+        force_endpoint=force_endpoint,
+        cache_dir=output_dir,
+    )
+
+    try:
+        path = download_snapshot(
+            repo_id=model_id,
+            revision=revision,
+            repo_type=repo_type,
+            cache_dir=output_dir,
+            force_download=force_download,
+            force_endpoint=force_endpoint,
+            token=token,
+            settings=settings,
+        )
+        console.print(f"[green]✓ Successfully downloaded to:[/] {path}")
+    except DownloadError as e:
+        console.print(f"[red]✗ Download failed:[/] {e}")
+        raise typer.Exit(code=1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Download cancelled by user[/]")
+        raise typer.Exit(code=130)
 
 @app.command()
 def list_profiles() -> None:
