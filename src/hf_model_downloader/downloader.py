@@ -30,13 +30,13 @@ def _handle_interrupt(signum: int, frame: Any) -> None:
 
 def _calculate_backoff(attempt: int, base_wait: float, max_wait: float, jitter: float) -> float:
     """Calculate exponential backoff with jitter.
-    
+
     Args:
         attempt: Current attempt number (0-indexed)
         base_wait: Base wait time in seconds
         max_wait: Maximum wait time in seconds
         jitter: Jitter factor (0.0-1.0)
-    
+
     Returns:
         Wait time in seconds
     """
@@ -65,10 +65,10 @@ def download_snapshot(
     ignore_patterns: list[str] | None = None,
 ) -> Path:
     """Download a snapshot from HuggingFace Hub with retry logic.
-    
+
     This is the main download function that wraps huggingface_hub.snapshot_download
     with retry logic, progress reporting, and error handling.
-    
+
     Args:
         repo_id: HuggingFace repository ID (e.g., 'bert-base-uncased')
         revision: Model revision/branch/tag
@@ -80,10 +80,10 @@ def download_snapshot(
         force_endpoint: Override HF_ENDPOINT env var with settings.endpoint
         allow_patterns: File patterns to include
         ignore_patterns: File patterns to exclude
-    
+
     Returns:
         Path to the downloaded snapshot
-    
+
     Raises:
         DownloadError: If download fails after all retries
         KeyboardInterrupt: If user interrupts with Ctrl+C
