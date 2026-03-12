@@ -227,7 +227,6 @@ def download(
     settings = load_settings(
         endpoint=endpoint,
         force_endpoint=force_endpoint,
-        local_dir=output,
         max_workers=max_workers,
     )
 
