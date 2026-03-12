@@ -154,7 +154,7 @@ hfmdl download bert-base-uncased --max-workers 4
 | `--repo-type` | | Repository type: model, dataset, space | `model` |
 | `--endpoint` | | Override endpoint URL | Config value |
 | `--force-endpoint` | `-f` | Ignore HF_ENDPOINT env var | False |
-| `--output` | `-o` | Output/cache directory | Config value |
+| `--output` | `-o` | Output directory (exports with real filenames) | Config value |
 | `--allow-pattern` | | File patterns to include (repeatable) | None |
 | `--ignore-pattern` | | File patterns to exclude (repeatable) | None |
 | `--max-workers` | | Maximum parallel workers | Config value |

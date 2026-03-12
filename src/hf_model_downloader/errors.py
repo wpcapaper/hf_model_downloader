@@ -57,8 +57,10 @@ except ImportError:
     URLLIB3TimeoutError = None
 
 def classify_error(exc: Exception) -> Tuple[bool, str]:
-    """
-    Classify an exception as retriable or non-retriable.
+    """Classify an exception as retriable or non-retriable.
+
+    IMPORTANT: Check network errors BEFORE OSError because requests
+    exceptions inherit from OSError/IOError.
 
     Args:
         exc: The exception to classify
@@ -68,7 +70,28 @@ def classify_error(exc: Exception) -> Tuple[bool, str]:
         - is_retriable: True if the error is transient and worth retrying
         - reason: Human-readable explanation of the classification
     """
-    # Check for disk/storage errors (non-retriable)
+    # Check for timeout errors (retriable) - MUST be before OSError check
+    if requests is not None:
+        if isinstance(exc, requests.exceptions.Timeout):
+            return True, "Request timeout - transient, retry recommended"
+
+        if isinstance(exc, requests.exceptions.ConnectionError):
+            error_msg = str(exc).lower()
+            # DNS failures
+            if "dns" in error_msg or "name resolution" in error_msg or "getaddrinfo" in error_msg:
+                return True, "DNS resolution failure - transient, retry recommended"
+            # Connection reset, refused, etc.
+            return True, "Connection error - transient, retry recommended"
+
+    # Check for urllib3 timeout (retriable) - MUST be before OSError check
+    if URLLIB3TimeoutError is not None and isinstance(exc, URLLIB3TimeoutError):
+        return True, "Network timeout - transient, retry recommended"
+
+    # Check for disk/storage errors (non-retriable) - AFTER network errors
+    if isinstance(exc, (OSError, PermissionError)):
+        # Disk full, permission denied, etc.
+        error_msg = str(exc).lower()
+    # Check for disk/storage errors (non-retriable) - AFTER network errors
     if isinstance(exc, (OSError, PermissionError)):
         # Disk full, permission denied, etc.
         error_msg = str(exc).lower()
@@ -132,22 +155,6 @@ def classify_error(exc: Exception) -> Tuple[bool, str]:
         # Unknown HTTP error - be conservative and retry
         return True, "HTTP error - potentially transient, retry recommended"
 
-    # Check for timeout errors (retriable)
-    if requests is not None:
-        if isinstance(exc, requests.exceptions.Timeout):
-            return True, "Request timeout - transient, retry recommended"
-
-        if isinstance(exc, requests.exceptions.ConnectionError):
-            error_msg = str(exc).lower()
-            # DNS failures
-            if "dns" in error_msg or "name resolution" in error_msg or "getaddrinfo" in error_msg:
-                return True, "DNS resolution failure - transient, retry recommended"
-            # Connection reset, refused, etc.
-            return True, "Connection error - transient, retry recommended"
-
-    # Check for urllib3 timeout (retriable)
-    if URLLIB3TimeoutError is not None and isinstance(exc, URLLIB3TimeoutError):
-        return True, "Network timeout - transient, retry recommended"
 
     # Check for any ReadError by name (duck typing for different httpx versions)
     # ReadError happens when connection is interrupted during file transfer
