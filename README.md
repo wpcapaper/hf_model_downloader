@@ -23,17 +23,14 @@ uv sync
 ## Quick Start
 
 ```bash
-# Download a model
-hfmdl download bert-base-uncased
-
-# Download a specific revision
-hfmdl download bert-base-uncased --revision v1.0
+# Download a specific quantization of a GGUF model
+hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF --allow-pattern "*UD-Q6_K_XL*"
 
 # Download to a specific directory
-hfmdl download bert-base-uncased --output ./models
+hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF --allow-pattern "*UD-Q6_K_XL*" --output ./models
 
 # Use a mirror (default: hf-mirror.com)
-HF_ENDPOINT=https://hf-mirror.com hfmdl download bert-base-uncased
+HF_ENDPOINT=https://hf-mirror.com hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF --allow-pattern "*UD-Q6_K_XL*"
 ```
 
 ## Configuration
@@ -96,18 +93,18 @@ log_every_attempt = true
 
 # Model profiles
 [[models]]
+name = "qwen35-35b-q6"
+repo_id = "unsloth/Qwen3.5-35B-A3B-GGUF"
+revision = "main"
+repo_type = "model"
+allow_patterns = ["*UD-Q6_K_XL*"]
+output_dir = "./models/qwen35"
+
+[[models]]
 name = "bert-tiny"
 repo_id = "prajjwal1/bert-tiny"
 revision = "main"
 repo_type = "model"
-
-[[models]]
-name = "gpt2-small"
-repo_id = "gpt2"
-revision = "main"
-repo_type = "model"
-allow_patterns = ["*.json", "*.bin"]
-output_dir = "./models/gpt2"
 ```
 
 ## Commands
@@ -121,7 +118,7 @@ Download a model, dataset, or space from HuggingFace.
 hfmdl download bert-base-uncased
 
 # Download using a profile
-hfmdl download --profile bert-tiny
+hfmdl download --profile qwen35-35b-q6
 
 # Download a specific revision
 hfmdl download bert-base-uncased --revision v1.0
@@ -319,6 +316,23 @@ Press `Ctrl+C` to abort a download. The tool exits with code 4 (aborted by user)
 
 ## Examples
 
+### Download a Specific GGUF Quantization
+
+Download only the quantization you need from a GGUF model repository:
+
+```bash
+# Download UD-Q6_K_XL quantization (~29GB)
+hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF --allow-pattern "*UD-Q6_K_XL*"
+
+# Download UD-Q4_K_XL quantization (~20GB, smaller)
+hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF --allow-pattern "*UD-Q4_K_XL*"
+
+# Download with model config
+hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF \
+  --allow-pattern "*UD-Q6_K_XL*" \
+  --allow-pattern "config.json"
+```
+
 ### Download Specific Files
 
 ```bash
@@ -338,18 +352,18 @@ First, add a profile to your config:
 
 ```toml
 [[models]]
-name = "my-model"
-repo_id = "organization/my-model"
-revision = "v2.0"
+name = "qwen35-35b-q6"
+repo_id = "unsloth/Qwen3.5-35B-A3B-GGUF"
+revision = "main"
 repo_type = "model"
-allow_patterns = ["*.bin", "config.json"]
-output_dir = "./models/my-model"
+allow_patterns = ["*UD-Q6_K_XL*"]
+output_dir = "./models/qwen35"
 ```
 
 Then download:
 
 ```bash
-hfmdl download --profile my-model
+hfmdl download --profile qwen35-35b-q6
 ```
 
 ### Download Datasets and Spaces
@@ -385,7 +399,7 @@ hf_hub_etag_timeout = 60.0
 2. Increase concurrent workers:
 
 ```bash
-hfmdl download bert-base-uncased --max-workers 16
+hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF --allow-pattern "*UD-Q6_K_XL*" --max-workers 16
 ```
 
 3. Enable high performance mode in config:
