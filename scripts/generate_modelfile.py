@@ -12,6 +12,10 @@ from typing import Any
 
 import requests
 
+# Reuse hfmdl configuration
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from hf_model_downloader.config import load_settings
+
 
 def fetch_repo_file(
     repo_id: str, filename: str, endpoint: str = "https://huggingface.co"
@@ -176,21 +180,43 @@ def generate_modelfile(
     return "\n".join(lines)
 
 
+def get_endpoint_from_config() -> str:
+    """Get endpoint from hfmdl configuration."""
+    try:
+        settings = load_settings()
+        # Use effective endpoint (respects HF_ENDPOINT env var)
+        return settings.get_effective_endpoint()
+    except Exception:
+        # Fallback to default if config not found or error
+        return "https://huggingface.co"
+
+
 def main():
+    # Get default endpoint from config
+    default_endpoint = get_endpoint_from_config()
+
     parser = argparse.ArgumentParser(
         description="Generate Ollama Modelfile from GGUF and HuggingFace repository",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=f"""
 Examples:
   %(prog)s ./model.gguf Qwen/Qwen3.5-0.8B
   %(prog)s ./model.gguf Qwen/Qwen3.5-0.8B --system "You are a coding expert"
   %(prog)s ./model.gguf unsloth/Qwen3.5-35B-A3B-GGUF --temperature 0.6
+
+Configuration:
+  Uses hfmdl config from ~/.config/hfmdl/config.toml
+  Current default endpoint: {default_endpoint}
         """,
     )
 
     parser.add_argument("gguf_path", type=Path, help="Path to GGUF file")
     parser.add_argument("repo_id", help="HuggingFace repository ID (e.g., 'Qwen/Qwen3.5-0.8B')")
-    parser.add_argument("--endpoint", default="https://huggingface.co", help="HuggingFace endpoint")
+    parser.add_argument(
+        "--endpoint",
+        default=default_endpoint,
+        help=f"HuggingFace endpoint (default: {default_endpoint})",
+    )
     parser.add_argument("--system", help="System prompt")
     parser.add_argument("--temperature", type=float, help="Temperature parameter")
     parser.add_argument(
@@ -266,7 +292,5 @@ Examples:
         except FileNotFoundError:
             print("Error: 'ollama' command not found. Is Ollama installed?", file=sys.stderr)
             sys.exit(1)
-
-
 if __name__ == "__main__":
     main()

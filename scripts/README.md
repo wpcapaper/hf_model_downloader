@@ -2,12 +2,18 @@
 
 基于 GGUF 文件和 HuggingFace 仓库元数据自动生成 Ollama Modelfile。
 
+## 特性
+
+- ✅ **自动复用 hfmdl 配置** - 自动读取 `~/.config/hfmdl/config.toml` 中的镜像设置
+- ✅ **智能模板检测** - 自动识别 Qwen、Llama 等模型的聊天模板
+- ✅ **一键创建模型** - 支持 `--create` 参数直接创建 Ollama 模型
+- ✅ **完整的参数提取** - 从 config.json 提取上下文长度、停止词等
+
 ## 安装依赖
 
 ```bash
 pip install requests
 ```
-
 ## 基本用法
 
 ```bash
@@ -33,12 +39,12 @@ python scripts/generate_modelfile.py ./model.gguf Qwen/Qwen3.5-0.8B \
 |------|------|------|
 | `gguf_path` | GGUF 文件路径 | `./model.gguf` |
 | `repo_id` | HuggingFace 仓库 ID | `Qwen/Qwen3.5-0.8B` |
+| `--endpoint` | HuggingFace 端点（自动从配置读取） | `https://hf-mirror.com` |
 | `--system` | 系统提示词 | `"You are a helpful AI"` |
 | `--temperature` | 温度参数 | `0.6` |
 | `--output` | Modelfile 输出路径 | `./Modelfile` |
 | `--create` | 自动生成 Ollama 模型 | - |
 | `--name` | Ollama 模型名称 | `my-model` |
-
 ## 工作原理
 
 脚本会从源仓库获取以下文件：
@@ -91,17 +97,28 @@ ollama run qwen35-35b-q6
 
 ### 无法获取仓库元数据
 
-如果脚本无法访问 HuggingFace，可以使用镜像：
+检查你的配置：
+
+```bash
+# 查看当前配置端点
+python -c "from hf_model_downloader.config import load_settings; print(load_settings().get_effective_endpoint())"
+
+# 如果配置错误，编辑配置文件
+nano ~/.config/hfmdl/config.toml
+```
+
+### 临时覆盖端点
+
+即使配置了镜像，也可以临时使用官方源：
 
 ```bash
 python scripts/generate_modelfile.py ./model.gguf Qwen/Qwen3.5-0.8B \
-  --endpoint https://hf-mirror.com
+  --endpoint https://huggingface.co
 ```
 
 ### 模板不正确
 
 可以手动编辑生成的 Modelfile，调整 TEMPLATE 部分。
-
 ## 与下载器集成（未来）
 
 可以考虑将此功能集成到 `hfmdl` 中：
