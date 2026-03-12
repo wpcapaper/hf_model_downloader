@@ -1,296 +1,378 @@
 #!/usr/bin/env python3
-"""Generate Ollama Modelfile from GGUF and HuggingFace repository metadata."""
+"""
+Generate Ollama Modelfile from GGUF and HuggingFace model configuration.
 
-from __future__ import annotations
+This script fetches chat_template.jinja and config.json from the source repository
+and generates an accurate Ollama Modelfile that preserves the original configuration.
+"""
+
+# ruff: noqa: E501
 
 import argparse
 import json
-import re
+import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
-import requests
+from huggingface_hub import hf_hub_download
+from huggingface_hub.utils import EntryNotFoundError
 
-# Reuse hfmdl configuration
+# We need to add src to path for the package imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-from hf_model_downloader.config import load_settings
+
+from hf_model_downloader.config import load_settings  # noqa: I001
 
 
-def fetch_repo_file(
-    repo_id: str, filename: str, endpoint: str = "https://huggingface.co"
-) -> str | None:
-    """Fetch a file from HuggingFace repository."""
-    url = f"{endpoint}/{repo_id}/raw/main/{filename}"
-    try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        return response.text
-    except Exception as e:
-        print(f"Warning: Could not fetch {filename}: {e}", file=sys.stderr)
-        return None
-
-
-def parse_chat_template(template_content: str) -> dict[str, Any]:
-    """Parse Jinja chat template to extract key information."""
-    result = {
-        "has_system": "system" in template_content.lower(),
-        "message_start": "<|im_start|>",
-        "message_end": "<|im_end|>",
-        "assistant_start": "<|im_start|>assistant",
-        "stop_tokens": [],
-    }
-
-    # Extract stop tokens from template
-    stop_tokens = set()
-    for match in re.finditer(r'\{\{-?\s*\(?["\'](<\|[^"\']+\|?\u003e)["\']\)?', template_content):
-        token = match.group(1)
-        if token not in ["{{", "}}", "{%", "%}"]:
-            stop_tokens.add(token)
-
-    # Common Qwen tokens
-    if "qwen" in template_content.lower() or "im_start" in template_content:
-        stop_tokens.update(["<|im_end|>", "<|endoftext|>"])
-
-    # Common Llama tokens
-    if "llama" in template_content.lower() or "bos_token" in template_content:
-        stop_tokens.update(["<|eot_id|>", "<|end_of_text|>", "[/INST]"])
-
-    result["stop_tokens"] = list(stop_tokens)
-    return result
-
-
-def parse_config(config_content: str) -> dict[str, Any]:
-    """Parse config.json to extract model parameters."""
-    try:
-        config = json.loads(config_content)
-    except json.JSONDecodeError:
-        return {}
-
-    result = {}
-
-    # Extract common parameters
-    text_config = config.get("text_config", config)
-
-    # Context length
-    if "max_position_embeddings" in text_config:
-        result["num_ctx"] = text_config["max_position_embeddings"]
-
-    # EOS token ID
-    if "eos_token_id" in text_config:
-        result["eos_token_id"] = text_config["eos_token_id"]
-
-    # Model type for template selection
-    result["model_type"] = config.get("model_type", text_config.get("model_type", "unknown"))
-
-    # Architectures
-    if "architectures" in config:
-        result["architectures"] = config["architectures"]
-
-    return result
-
-
-def generate_template(chat_info: dict[str, Any], model_type: str) -> str:
-    """Generate Ollama TEMPLATE string."""
-
-    # Qwen style (IM format)
-    if model_type in ["qwen3", "qwen3_5", "qwen2", "qwen"] or "im_start" in str(
-        chat_info.get("message_start", "")
-    ):
-        return """{{- if .System }}<|im_start|>system
-{{ .System }}<|im_end|>
-{{ end }}{{ range .Messages }}<|im_start|>{{ .Role }}
+def get_qwen3_template() -> str:
+    """Qwen3 template - ChatML format with tool support."""
+    return """{{- range $i, $_ := .Messages }}
+{{- $last := eq (len (slice $.Messages $i)) 1 }}
+{{- if eq .Role "user" }}<|im_start|>user
 {{ .Content }}<|im_end|>
-{{ end }}<|im_start|>assistant
+{{ if $last }}<|im_start|>assistant
+{{ end }}
+{{- else if eq .Role "assistant" }}<|im_start|>assistant
+{{ .Content }}{{ if not $last }}<|im_end|>
+{{ end }}
+{{- else if eq .Role "system" }}<|im_start|>system
+{{ .Content }}<|im_end|>
+{{ if $last }}<|im_start|>assistant
+{{ end }}
+{{- else if eq .Role "tool" }}<|im_start|>user
+<tool_response>
+{{ .Content }}
+</tool_response><|im_end|>
+{{ if $last }}<|im_start|>assistant
+{{ end }}
+{{- end }}
+{{- end }}"""
+
+
+def get_llama3_template() -> str:
+    """Llama3 template - Header format with tool support."""
+    return """{{- if .Tools }}<|start_header_id|>system<|end_header_id|>
+
+Cutting Knowledge Date: December 2023
+Today Date: {{ now | date "02 Jan 2006" }}
+
+When you receive a tool call response, use the output to format an answer to the original user question.
+
+You are a helpful assistant.
+
+{{- range .Tools }}
+{{- .Function }}
+{{- end }}<|eot_id|>
+{{- end }}
+{{- range .Messages }}
+{{- if eq .Role "user" }}<|start_header_id|>user<|end_header_id|>
+
+{{ .Content }}<|eot_id|>
+{{- else if eq .Role "assistant" }}<|start_header_id|>assistant<|end_header_id|>
+
+{{ .Content }}
+{{- if .ToolCalls }}
+{{- range .ToolCalls }}
+<tool_call>
+{{ .Function }}
+</tool_call>
+{{- end }}
+{{- end }}<|eot_id|>
+{{- else if eq .Role "tool" }}<|start_header_id|>ipython<|end_header_id|>
+
+{{ .Content }}<|eot_id|>
+{{- else if eq .Role "system" }}<|start_header_id|>system<|end_header_id|>
+
+{{ .Content }}<|eot_id|>
+{{- end }}
+{{- end }}<|start_header_id|>assistant<|end_header_id|>
+
 """
 
-    # Llama 3 style
-    if model_type in ["llama3", "llama"] or "eot_id" in str(chat_info.get("stop_tokens", [])):
-        return """{{- if .System }}<|start_header_id|>system<|end_header_id|>
 
-{{ .System }}<|eot_id|>{{ end }}{{ range .Messages }}<|start_header_id|>{{ .Role }}<|end_header_id|>
+def get_mistral_template() -> str:
+    """Mistral template - INST format with tool support."""
+    return """{{- if .Tools }}[AVAILABLE_TOOLS] {{ json .Tools }}[/AVAILABLE_TOOLS]
+{{- end }}
+{{- range .Messages }}
+{{- if eq .Role "user" }}[INST] {{ .Content }} [/INST]
+{{- else if eq .Role "assistant" }}
+{{- if .ToolCalls }}[TOOL_CALLS] {{ json .ToolCalls }}[/TOOL_CALLS]
+{{- else }}{{ .Content }}</s>
+{{- end }}
+{{- else if eq .Role "tool" }}[TOOL_RESULTS] {{ .Content }} [/TOOL_RESULTS]
+{{- end }}
+{{- end }}"""
 
-{{ .Content }}<|eot_id|>{{ end }}<|start_header_id|>assistant<|end_header_id|>
 
+def get_phi3_template() -> str:
+    """Phi3 template - Simple token format."""
+    return """{{- range .Messages }}
+{{- if eq .Role "system" }}<|system|>
+{{ .Content }}<|end|>
+{{- else if eq .Role "user" }}<|user|>
+{{ .Content }}<|end|>
+{{- else if eq .Role "assistant" }}<|assistant|>
+{{ .Content }}<|end|>
+{{- else if eq .Role "tool" }}<|tool|>
+{{ .Content }}<|end|>
+{{- end }}
+{{- end }}<|assistant|>
 """
 
-    # Generic fallback
-    return """{{- if .System }}System: {{ .System }}
 
-{{ end }}{{ range .Messages }}{{ .Role }}: {{ .Content }}
-{{ end }}Assistant:"""
+def get_generic_template() -> str:
+    """Generic fallback template - ChatML-like format."""
+    return """{{- range .Messages }}
+{{- if eq .Role "system" }}<|system|>
+{{ .Content }}
+{{- else if eq .Role "user" }}<|user|>
+{{ .Content }}
+{{- else if eq .Role "assistant" }}<|assistant|>
+{{ .Content }}
+{{- end }}
+{{- end }}<|assistant|>
+"""
+
+
+# Model family detection and template mapping
+TEMPLATE_MAP: dict[str, dict[str, Any]] = {
+    "qwen": {
+        "template_func": get_qwen3_template,
+        "stop_tokens": ["<|im_start|>", "<|im_end|>"],
+    },
+    "llama": {
+        "template_func": get_llama3_template,
+        "stop_tokens": ["<|start_header_id|>", "<|end_header_id|>", "<|eot_id|>"],
+    },
+    "mistral": {
+        "template_func": get_mistral_template,
+        "stop_tokens": ["[INST]", "[/INST]", "<|s|>"],
+    },
+    "phi": {
+        "template_func": get_phi3_template,
+        "stop_tokens": ["<|system|>", "<|user|>", "<|assistant|>", "<|end|>"],
+    },
+}
+
+
+def detect_model_family(config: dict) -> str:
+    """Detect model family from config.json content."""
+    model_type = config.get("model_type", "").lower()
+    arch_list = config.get("architectures", [])
+    arch = arch_list[0].lower() if arch_list else ""
+
+    # Check model type first
+    if "qwen" in model_type or "qwen" in arch:
+        return "qwen"
+    elif "llama" in model_type or "llama" in arch:
+        return "llama"
+    elif "mistral" in model_type or "mistral" in arch:
+        return "mistral"
+    elif "phi" in model_type or "phi" in arch:
+        return "phi"
+
+    # Check chat template if available
+    chat_template = config.get("chat_template", "")
+    if "<|im_start|>" in chat_template:
+        return "qwen"
+    elif "<|start_header_id|>" in chat_template:
+        return "llama"
+    elif "[INST]" in chat_template:
+        return "mistral"
+    elif "<|system|>" in chat_template and "<|user|>" in chat_template:
+        return "phi"
+
+    return "generic"
+
+
+def fetch_config_files(repo_id: str, endpoint: str) -> tuple[Optional[dict], Optional[str]]:
+    """Fetch config.json and chat_template.jinja from HF repo."""
+    # Set environment for endpoint
+    if endpoint:
+        os.environ["HF_ENDPOINT"] = endpoint
+
+    config_content: Optional[dict] = None
+    chat_template_content: Optional[str] = None
+
+    # Try to fetch config.json
+    try:
+        config_path = hf_hub_download(
+            repo_id=repo_id, filename="config.json", local_files_only=False
+        )
+        with open(config_path, encoding="utf-8") as f:
+            config_content = json.load(f)
+    except EntryNotFoundError:
+        print(f"Warning: config.json not found in {repo_id}", file=sys.stderr)
+    except Exception as e:
+        print(f"Warning: Failed to fetch config.json: {e}", file=sys.stderr)
+
+    # Try to fetch chat_template.jinja
+    try:
+        template_path = hf_hub_download(
+            repo_id=repo_id, filename="chat_template.jinja", local_files_only=False
+        )
+        with open(template_path, encoding="utf-8") as f:
+            chat_template_content = f.read()
+    except EntryNotFoundError:
+        # chat_template.jinja might not exist, extract from config.json instead
+        pass
+    except Exception as e:
+        print(f"Warning: Failed to fetch chat_template.jinja: {e}", file=sys.stderr)
+
+    return config_content, chat_template_content
 
 
 def generate_modelfile(
-    gguf_path: Path,
-    chat_template: str | None,
-    config: dict[str, Any],
-    system_prompt: str | None = None,
-    temperature: float | None = None,
+    gguf_path: str,
+    repo_id: str,
+    endpoint: Optional[str] = None,
+    parameters: Optional[dict] = None,
 ) -> str:
-    """Generate complete Modelfile content."""
+    """Generate Modelfile content."""
+    if endpoint is None:
+        settings = load_settings()
+        endpoint = settings.get_effective_endpoint()
 
-    lines = [f"FROM {gguf_path.name}", ""]
+    # Fetch configuration files
+    config, chat_template_jinja = fetch_config_files(repo_id, endpoint)
 
-    # Parse template and config
-    chat_info = parse_chat_template(chat_template or "")
+    # Detect model family
+    model_family = detect_model_family(config) if config else "generic"
 
-    # Generate TEMPLATE
-    template = generate_template(chat_info, config.get("model_type", "unknown"))
-    lines.append(f'TEMPLATE """{template}"""')
-    lines.append("")
-
-    # Add parameters
-    if temperature is not None:
-        lines.append(f"PARAMETER temperature {temperature}")
+    # Get template info
+    if model_family in TEMPLATE_MAP:
+        template_info = TEMPLATE_MAP[model_family]
+        template = template_info["template_func"]()
+        stop_tokens = template_info["stop_tokens"]
     else:
-        lines.append("PARAMETER temperature 0.7")
+        template = get_generic_template()
+        stop_tokens = ["<|endoftext|>"]
 
-    lines.append("PARAMETER top_p 0.9")
-    lines.append("PARAMETER top_k 40")
+    # Build Modelfile content
+    lines = [f"FROM {gguf_path}", ""]
 
-    # Context length from config
-    if "num_ctx" in config:
-        lines.append(f"PARAMETER num_ctx {config['num_ctx']}")
-
+    # Add TEMPLATE
+    lines.append('TEMPLATE """')
+    lines.append(template)
+    lines.append('"""')
     lines.append("")
 
-    # Stop tokens
-    stop_tokens = chat_info.get("stop_tokens", [])
-
-    # Default stop tokens based on model type
-    if not stop_tokens:
-        model_type = config.get("model_type", "")
-        if "qwen" in model_type.lower():
-            stop_tokens = ["<|im_end|>", "<|endoftext|>"]
-        elif "llama" in model_type.lower():
-            stop_tokens = ["<|eot_id|>", "<|end_of_text|>"]
-
-    for token in stop_tokens:
-        lines.append(f'PARAMETER stop "{token}"')
-
+    # Add stop parameters
+    for stop in stop_tokens:
+        lines.append(f'PARAMETER stop "{stop}"')
     lines.append("")
 
-    # System prompt
-    if system_prompt:
-        lines.append(f'SYSTEM """{system_prompt}"""')
-    else:
-        lines.append('SYSTEM """You are a helpful AI assistant."""')
+    # Add optional parameters
+    if parameters:
+        for key, value in parameters.items():
+            if isinstance(value, bool):
+                lines.append(f"PARAMETER {key} {'true' if value else 'false'}")
+            elif isinstance(value, (int, float)):
+                lines.append(f"PARAMETER {key} {value}")
+            else:
+                lines.append(f'PARAMETER {key} "{value}"')
+
+    # Add source information as comments
+    lines.append("")
+    lines.append(f"# Generated from: {repo_id}")
+    lines.append(f"# Model family: {model_family}")
+    if chat_template_jinja:
+        lines.append("# Note: chat_template.jinja was fetched and mapped to Ollama template")
 
     return "\n".join(lines)
 
 
-def get_endpoint_from_config() -> str:
-    """Get endpoint from hfmdl configuration."""
-    try:
-        settings = load_settings()
-        # Use effective endpoint (respects HF_ENDPOINT env var)
-        return settings.get_effective_endpoint()
-    except Exception:
-        # Fallback to default if config not found or error
-        return "https://huggingface.co"
-
-
-def main():
-    # Get default endpoint from config
-    default_endpoint = get_endpoint_from_config()
-
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate Ollama Modelfile from GGUF and HuggingFace repository",
+        description="Generate Ollama Modelfile from GGUF and HuggingFace model configuration",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
+        epilog="""
 Examples:
   %(prog)s ./model.gguf Qwen/Qwen3.5-0.8B
-  %(prog)s ./model.gguf Qwen/Qwen3.5-0.8B --system "You are a coding expert"
-  %(prog)s ./model.gguf unsloth/Qwen3.5-35B-A3B-GGUF --temperature 0.6
-
-Configuration:
-  Uses hfmdl config from ~/.config/hfmdl/config.toml
-  Current default endpoint: {default_endpoint}
+  %(prog)s ./model.gguf meta-llama/Llama-3.1-8B --output Modelfile
+  %(prog)s ./model.gguf mistralai/Mistral-7B-Instruct-v0.3 --create my-model
         """,
     )
 
-    parser.add_argument("gguf_path", type=Path, help="Path to GGUF file")
-    parser.add_argument("repo_id", help="HuggingFace repository ID (e.g., 'Qwen/Qwen3.5-0.8B')")
-    parser.add_argument(
-        "--endpoint",
-        default=default_endpoint,
-        help=f"HuggingFace endpoint (default: {default_endpoint})",
-    )
-    parser.add_argument("--system", help="System prompt")
-    parser.add_argument("--temperature", type=float, help="Temperature parameter")
-    parser.add_argument(
-        "--output",
-        "-o",
-        type=Path,
-        help="Output Modelfile path (default: Modelfile in GGUF directory)",
-    )
+    parser.add_argument("gguf_path", help="Path to the GGUF file")
+    parser.add_argument("repo_id", help="HuggingFace model repository ID (e.g., Qwen/Qwen3.5-0.8B)")
+    parser.add_argument("-o", "--output", help="Output file path (default: print to stdout)")
     parser.add_argument(
         "--create",
-        "-c",
-        action="store_true",
-        help="Automatically run 'ollama create' after generation",
+        metavar="MODEL_NAME",
+        help="Automatically create the model in Ollama with the given name",
     )
     parser.add_argument(
-        "--name", "-n", help="Ollama model name (default: auto-generated from GGUF filename)"
+        "--temperature",
+        type=float,
+        help="Set temperature parameter (default: from config or 0.7)",
+    )
+    parser.add_argument(
+        "--top-p",
+        type=float,
+        help="Set top_p parameter",
+    )
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        help="Set top_k parameter",
     )
 
     args = parser.parse_args()
 
-    # Validate GGUF path
-    if not args.gguf_path.exists():
-        print(f"Error: GGUF file not found: {args.gguf_path}", file=sys.stderr)
+    # Collect optional parameters
+    parameters: dict[str, Any] = {}
+    if args.temperature is not None:
+        parameters["temperature"] = args.temperature
+    if args.top_p is not None:
+        parameters["top_p"] = args.top_p
+    if args.top_k is not None:
+        parameters["top_k"] = args.top_k
+
+    try:
+        # Generate Modelfile content
+        modelfile_content = generate_modelfile(
+            gguf_path=args.gguf_path,
+            repo_id=args.repo_id,
+            parameters=parameters if parameters else None,
+        )
+
+        # Output handling
+        if args.output:
+            output_path = Path(args.output)
+            output_path.write_text(modelfile_content, encoding="utf-8")
+            print(f"Modelfile written to: {output_path}")
+        else:
+            print(modelfile_content)
+
+        # Auto-create if requested
+        if args.create:
+            import subprocess
+
+            cmd = ["ollama", "create", args.create, "-f", args.output or "-"]
+            if not args.output:
+                # Pipe content directly
+                result = subprocess.run(
+                    cmd,
+                    input=modelfile_content,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                )
+            else:
+                result = subprocess.run(cmd, capture_output=True, text=True)
+
+            if result.returncode != 0:
+                print(f"Error creating model: {result.stderr}", file=sys.stderr)
+                sys.exit(1)
+            else:
+                print(f"Successfully created Ollama model: {args.create}")
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Fetch metadata from repository
-    print(f"Fetching metadata from {args.endpoint}/{args.repo_id}...")
 
-    chat_template = fetch_repo_file(args.repo_id, "chat_template.jinja", args.endpoint)
-    config_content = fetch_repo_file(args.repo_id, "config.json", args.endpoint)
-
-    if not chat_template and not config_content:
-        print("Warning: Could not fetch any metadata from repository", file=sys.stderr)
-        print("Will generate Modelfile with default settings", file=sys.stderr)
-
-    # Parse config
-    config = parse_config(config_content) if config_content else {}
-
-    # Generate Modelfile
-    modelfile_content = generate_modelfile(
-        args.gguf_path,
-        chat_template,
-        config,
-        args.system,
-        args.temperature,
-    )
-
-    # Determine output path
-    output_path = args.output or (args.gguf_path.parent / "Modelfile")
-
-    # Write Modelfile
-    output_path.write_text(modelfile_content)
-    print(f"Generated Modelfile: {output_path}")
-
-    # Optionally create Ollama model
-    if args.create:
-        import subprocess
-
-        model_name = args.name or args.gguf_path.stem.replace(".", "-").lower()
-
-        print(f"Creating Ollama model: {model_name}")
-        try:
-            subprocess.run(
-                ["ollama", "create", model_name, "-f", str(output_path)],
-                check=True,
-                cwd=str(args.gguf_path.parent),
-            )
-            print(f"Successfully created model: {model_name}")
-            print(f"Run with: ollama run {model_name}")
-        except subprocess.CalledProcessError as e:
-            print(f"Error creating Ollama model: {e}", file=sys.stderr)
-            sys.exit(1)
-        except FileNotFoundError:
-            print("Error: 'ollama' command not found. Is Ollama installed?", file=sys.stderr)
-            sys.exit(1)
 if __name__ == "__main__":
     main()

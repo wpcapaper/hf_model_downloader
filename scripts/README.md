@@ -1,134 +1,237 @@
-# Modelfile 生成脚本
+# Modelfile Generator Script
 
-基于 GGUF 文件和 HuggingFace 仓库元数据自动生成 Ollama Modelfile。
+Generate Ollama Modelfile from GGUF files and HuggingFace model configuration.
 
-## 特性
+This script fetches `chat_template.jinja` and `config.json` from the source repository and generates an accurate Ollama Modelfile that preserves the original configuration as much as possible.
 
-- ✅ **自动复用 hfmdl 配置** - 自动读取 `~/.config/hfmdl/config.toml` 中的镜像设置
-- ✅ **智能模板检测** - 自动识别 Qwen、Llama 等模型的聊天模板
-- ✅ **一键创建模型** - 支持 `--create` 参数直接创建 Ollama 模型
-- ✅ **完整的参数提取** - 从 config.json 提取上下文长度、停止词等
+## Features
 
-## 安装依赖
+- ✅ **Accurate Templates** - Uses Oracle-researched templates from Ollama official library (Qwen3, Llama3, Mistral, Phi3)
+- ✅ **Configuration Reuse** - Automatically reads mirror settings from `~/.config/hfmdl/config.toml`
+- ✅ **Model Family Detection** - Automatically detects model type from config.json
+- ✅ **One-click Model Creation** - Supports `--create` flag to directly create Ollama models
+- ✅ **No External Dependencies** - Uses existing `huggingface_hub` package
+
+## Prerequisites
+
+The script uses packages already installed with `hfmdl`:
+- `huggingface_hub` - For fetching files from HF Hub
+- `hf_model_downloader` - For configuration reuse
+
+## Usage
+
+### Basic Usage
 
 ```bash
-pip install requests
-```
-## 基本用法
-
-```bash
-# 基础用法
+# Generate Modelfile for Qwen3.5 model
 python scripts/generate_modelfile.py ./Qwen3.5-35B-A3B-UD-Q6_K_XL.gguf Qwen/Qwen3.5-0.8B
 
-# 指定系统提示词
-python scripts/generate_modelfile.py ./model.gguf Qwen/Qwen3.5-0.8B \
-  --system "You are a coding expert"
+# Save to file instead of stdout
+python scripts/generate_modelfile.py ./model.gguf meta-llama/Llama-3.1-8B --output Modelfile
 
-# 指定温度参数
-python scripts/generate_modelfile.py ./model.gguf Qwen/Qwen3.5-0.8B \
-  --temperature 0.6
-
-# 生成并自动创建 Ollama 模型
-python scripts/generate_modelfile.py ./model.gguf Qwen/Qwen3.5-0.8B \
-  --create --name my-model
+# Generate and automatically create Ollama model
+python scripts/generate_modelfile.py ./model.gguf mistralai/Mistral-7B-Instruct-v0.3 --create my-mistral
 ```
 
-## 参数说明
-
-| 参数 | 说明 | 示例 |
-|------|------|------|
-| `gguf_path` | GGUF 文件路径 | `./model.gguf` |
-| `repo_id` | HuggingFace 仓库 ID | `Qwen/Qwen3.5-0.8B` |
-| `--endpoint` | HuggingFace 端点（自动从配置读取） | `https://hf-mirror.com` |
-| `--system` | 系统提示词 | `"You are a helpful AI"` |
-| `--temperature` | 温度参数 | `0.6` |
-| `--output` | Modelfile 输出路径 | `./Modelfile` |
-| `--create` | 自动生成 Ollama 模型 | - |
-| `--name` | Ollama 模型名称 | `my-model` |
-## 工作原理
-
-脚本会从源仓库获取以下文件：
-1. `chat_template.jinja` - 聊天模板
-2. `config.json` - 模型配置
-
-然后自动解析：
-- 消息格式（IM 格式、Llama 格式等）
-- 停止词（stop tokens）
-- 上下文长度
-- 模型类型
-
-生成包含正确 TEMPLATE 和 PARAMETER 的 Modelfile。
-
-## 完整示例
-
-### 1. 下载 GGUF
+### With Parameters
 
 ```bash
+# Set temperature and other parameters
+python scripts/generate_modelfile.py ./model.gguf Qwen/Qwen3.5-0.8B \
+  --temperature 0.6 \
+  --top-p 0.9 \
+  --top-k 40
+```
+
+### Full Workflow Example
+
+```bash
+# 1. Download GGUF model
 hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF \
   --allow-pattern "*UD-Q6_K_XL*" \
   --output ./my-models
-```
 
-### 2. 生成 Modelfile
-
-```bash
+# 2. Generate and create Ollama model
 python scripts/generate_modelfile.py \
   ./my-models/Qwen3.5-35B-A3B-UD-Q6_K_XL.gguf \
   Qwen/Qwen3.5-0.8B \
-  --system "You are Qwen, a large language model created by Alibaba Cloud." \
   --temperature 0.6 \
-  --create \
-  --name qwen35-35b-q6
-```
+  --create qwen35-35b-q6
 
-### 3. 运行模型
-
-```bash
+# 3. Run the model
 ollama run qwen35-35b-q6
 ```
 
-## 支持的模型类型
+## How It Works
 
-- **Qwen3/3.5**: 自动识别 `<|im_start|>` 格式
-- **Llama 3**: 自动识别 `<|eot_id|>` 格式
-- **其他**: 使用通用模板
+### 1. Configuration Fetching
 
-## 故障排除
+The script fetches these files from the HuggingFace repository:
+- `config.json` - Model architecture and configuration
+- `chat_template.jinja` - Chat template (if available separately)
 
-### 无法获取仓库元数据
+### 2. Model Family Detection
 
-检查你的配置：
+Detects model type from:
+- `model_type` field in config.json
+- `architectures` field in config.json
+- Chat template content patterns
+
+### 3. Template Mapping
+
+Maps detected model family to accurate Ollama templates:
+
+| Model Family | Template Features | Stop Tokens |
+|--------------|-------------------|-------------|
+| **Qwen3** | ChatML format with tool support | `<|im_start|>`, `<|im_end|>` |
+| **Llama3** | Header format with tool support | `<|start_header_id|>`, `<|end_header_id|>`, `<|eot_id|>` |
+| **Mistral** | INST format with tool support | `[INST]`, `[/INST]`, `<|s|>` |
+| **Phi3** | Simple token format | `<|system|>`, `<|user|>`, `<|assistant|>`, `<|end|>` |
+| **Generic** | Basic fallback template | `<|endoftext|>` |
+
+### 4. Template Details
+
+#### Qwen3 Template (ChatML)
+```go
+{{- range $i, $_ := .Messages }}
+{{- $last := eq (len (slice $.Messages $i)) 1 }}
+{{- if eq .Role "user" }}<|im_start|>user
+{{ .Content }}<|im_end|>
+{{ if $last }}<|im_start|>assistant
+{{ end }}
+{{- else if eq .Role "assistant" }}<|im_start|>assistant
+{{ .Content }}{{ if not $last }}<|im_end|>
+{{ end }}
+{{- end }}
+{{- end }}
+```
+
+#### Llama3 Template (Header)
+```go
+{{- range .Messages }}
+{{- if eq .Role "user" }}<|start_header_id|>user<|end_header_id|>
+
+{{ .Content }}<|eot_id|>
+{{- else if eq .Role "assistant" }}<|start_header_id|>assistant<|end_header_id|>
+
+{{ .Content }}<|eot_id|>
+{{- end }}
+{{- end }}<|start_header_id|>assistant<|end_header_id|>
+```
+
+## Command Line Options
+
+```
+usage: generate_modelfile.py [-h] [-o OUTPUT] [--create MODEL_NAME]
+                             [--temperature TEMPERATURE] [--top-p TOP_P]
+                             [--top-k TOP_K]
+                             gguf_path repo_id
+
+positional arguments:
+  gguf_path             Path to the GGUF file
+  repo_id               HuggingFace model repository ID (e.g.,
+                        Qwen/Qwen3.5-0.8B)
+
+options:
+  -h, --help            Show this help message and exit
+  -o OUTPUT, --output OUTPUT
+                        Output file path (default: print to stdout)
+  --create MODEL_NAME   Automatically create the model in Ollama with the
+                        given name
+  --temperature TEMPERATURE
+                        Set temperature parameter
+  --top-p TOP_P         Set top_p parameter
+  --top-k TOP_K         Set top_k parameter
+```
+
+## Configuration
+
+### Mirror Endpoint
+
+The script automatically uses your hfmdl configuration:
 
 ```bash
-# 查看当前配置端点
+# Check current endpoint
 python -c "from hf_model_downloader.config import load_settings; print(load_settings().get_effective_endpoint())"
 
-# 如果配置错误，编辑配置文件
+# Edit configuration
 nano ~/.config/hfmdl/config.toml
 ```
 
-### 临时覆盖端点
+### Environment Variable
 
-即使配置了镜像，也可以临时使用官方源：
-
-```bash
-python scripts/generate_modelfile.py ./model.gguf Qwen/Qwen3.5-0.8B \
-  --endpoint https://huggingface.co
-```
-
-### 模板不正确
-
-可以手动编辑生成的 Modelfile，调整 TEMPLATE 部分。
-## 与下载器集成（未来）
-
-可以考虑将此功能集成到 `hfmdl` 中：
+You can also override the endpoint via environment variable:
 
 ```bash
-# 未来可能的用法
-hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF \
-  --allow-pattern "*UD-Q6_K_XL*" \
-  --output ./my-models \
-  --ollama-create \
-  --ollama-name qwen35-35b-q6 \
-  --ollama-template-source Qwen/Qwen3.5-0.8B
+export HF_ENDPOINT=https://huggingface.co
+python scripts/generate_modelfile.py ./model.gguf Qwen/Qwen3.5-0.8B
 ```
+
+## Supported Model Types
+
+### Fully Supported
+- **Qwen3 / Qwen3.5** - Complete ChatML template with tool support
+- **Llama 3 / 3.1** - Full header template with tool support
+- **Mistral / Mixtral** - INST format with tool support
+- **Phi3 / Phi4** - Simple token format
+
+### Partially Supported
+Any other model type will use a generic fallback template. You can manually edit the generated Modelfile to adjust the TEMPLATE section.
+
+## Troubleshooting
+
+### Repository Not Found
+
+```bash
+# Verify the repository exists
+python -c "from huggingface_hub import model_info; print(model_info('Qwen/Qwen3.5-0.8B'))"
+```
+
+### Permission Denied
+
+For gated models, ensure you have access:
+
+```bash
+export HF_TOKEN=your_token_here
+python scripts/generate_modelfile.py ./model.gguf gated-model/repo
+```
+
+### Template Not Matching
+
+If the generated template doesn't work correctly:
+
+1. Check the source repository's `chat_template.jinja` manually
+2. Edit the generated Modelfile's TEMPLATE section
+3. Report an issue with the model type and expected behavior
+
+## Implementation Notes
+
+### Template Research
+
+Templates were researched from Ollama's official library:
+- Qwen3 template from `ollama pull qwen3`
+- Llama3 template from `ollama pull llama3`
+- Mistral template from `ollama pull mistral`
+- Phi3 template from `ollama pull phi3`
+
+### Design Decisions
+
+1. **Hardcoded Templates**: Rather than attempting to convert Jinja2 to Go templates (which is complex and error-prone), we use accurate pre-researched templates for known model families.
+
+2. **Configuration Reuse**: The script reuses hfmdl's configuration system to ensure consistent mirror usage across tools.
+
+3. **Graceful Degradation**: If files can't be fetched, the script still generates a working Modelfile with sensible defaults.
+
+## Future Enhancements
+
+Potential improvements:
+- Interactive template selection
+- Custom template override files
+- Batch processing multiple GGUFs
+- Integration into hfmdl CLI
+
+## References
+
+- [Ollama Modelfile Documentation](https://github.com/ollama/ollama/blob/main/docs/modelfile.md)
+- [Ollama Template Documentation](https://github.com/ollama/ollama/blob/main/docs/TEMPLATE.md)
+- [HuggingFace Chat Templates](https://huggingface.co/docs/transformers/main/chat_templating)
