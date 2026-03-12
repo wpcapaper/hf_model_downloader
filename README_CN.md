@@ -23,17 +23,14 @@ uv sync
 ## 快速开始
 
 ```bash
-# 下载模型
-hfmdl download bert-base-uncased
-
-# 下载指定版本
-hfmdl download bert-base-uncased --revision v1.0
+# 下载 GGUF 模型的特定量化版本
+hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF --allow-pattern "*UD-Q6_K_XL*"
 
 # 下载到指定目录
-hfmdl download bert-base-uncased --output ./models
+hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF --allow-pattern "*UD-Q6_K_XL*" --output ./models
 
 # 使用镜像（默认：hf-mirror.com）
-HF_ENDPOINT=https://hf-mirror.com hfmdl download bert-base-uncased
+HF_ENDPOINT=https://hf-mirror.com hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF --allow-pattern "*UD-Q6_K_XL*"
 ```
 
 ## 配置
@@ -96,18 +93,12 @@ log_every_attempt = true
 
 # 模型配置文件
 [[models]]
-name = "bert-tiny"
-repo_id = "prajjwal1/bert-tiny"
+name = "qwen35-35b-q6"
+repo_id = "unsloth/Qwen3.5-35B-A3B-GGUF"
 revision = "main"
 repo_type = "model"
-
-[[models]]
-name = "gpt2-small"
-repo_id = "gpt2"
-revision = "main"
-repo_type = "model"
-allow_patterns = ["*.json", "*.bin"]
-output_dir = "./models/gpt2"
+allow_patterns = ["*UD-Q6_K_XL*"]
+output_dir = "./models/qwen35"
 ```
 
 ## 命令
@@ -121,7 +112,7 @@ output_dir = "./models/gpt2"
 hfmdl download bert-base-uncased
 
 # 使用配置文件下载
-hfmdl download --profile bert-tiny
+hfmdl download --profile qwen35-35b-q6
 
 # 下载指定版本
 hfmdl download bert-base-uncased --revision v1.0
@@ -319,6 +310,36 @@ hfmdl download bert-base-uncased --no-retry-forever --max-attempts 10 --max-tota
 
 ## 示例
 
+### 下载 GGUF 模型的特定量化版本
+
+以 [unsloth/Qwen3.5-35B-A3B-GGUF](https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF) 为例：
+
+```bash
+# 下载 UD-Q6_K_XL 量化版本（约 29GB）
+hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF --allow-pattern "*UD-Q6_K_XL*"
+
+# 下载多个量化版本
+hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF \
+  --allow-pattern "*UD-Q4_K_XL*" \
+  --allow-pattern "*UD-Q6_K_XL*"
+
+# 下载模型和配置文件
+hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF \
+  --allow-pattern "*UD-Q6_K_XL*" \
+  --allow-pattern "config.json"
+```
+
+该仓库可用的量化版本：
+
+| 量化版本 | 模式 | 大小 |
+|----------|------|------|
+| UD-Q2_K_XL | `*UD-Q2_K_XL*` | ~11 GB |
+| UD-Q3_K_XL | `*UD-Q3_K_XL*` | ~15 GB |
+| UD-Q4_K_XL | `*UD-Q4_K_XL*` | ~20 GB |
+| UD-Q5_K_XL | `*UD-Q5_K_XL*` | ~24 GB |
+| UD-Q6_K_XL | `*UD-Q6_K_XL*` | ~29 GB |
+| UD-Q8_K_XL | `*UD-Q8_K_XL*` | ~45 GB |
+
 ### 下载特定文件
 
 ```bash
@@ -338,18 +359,18 @@ hfmdl download bert-base-uncased --ignore-pattern "*.safetensors"
 
 ```toml
 [[models]]
-name = "my-model"
-repo_id = "organization/my-model"
-revision = "v2.0"
+name = "qwen35-35b-q6"
+repo_id = "unsloth/Qwen3.5-35B-A3B-GGUF"
+revision = "main"
 repo_type = "model"
-allow_patterns = ["*.bin", "config.json"]
-output_dir = "./models/my-model"
+allow_patterns = ["*UD-Q6_K_XL*"]
+output_dir = "./models/qwen35"
 ```
 
 然后下载：
 
 ```bash
-hfmdl download --profile my-model
+hfmdl download --profile qwen35-35b-q6
 ```
 
 ### 下载数据集和空间
@@ -385,7 +406,7 @@ hf_hub_etag_timeout = 60.0
 2. 增加并发工作线程数：
 
 ```bash
-hfmdl download bert-base-uncased --max-workers 16
+hfmdl download unsloth/Qwen3.5-35B-A3B-GGUF --allow-pattern "*UD-Q6_K_XL*" --max-workers 16
 ```
 
 3. 在配置中启用高性能模式：
