@@ -56,7 +56,6 @@ except ImportError:
     requests = None
     URLLIB3TimeoutError = None
 
-
 def classify_error(exc: Exception) -> Tuple[bool, str]:
     """
     Classify an exception as retriable or non-retriable.
@@ -150,6 +149,10 @@ def classify_error(exc: Exception) -> Tuple[bool, str]:
     if URLLIB3TimeoutError is not None and isinstance(exc, URLLIB3TimeoutError):
         return True, "Network timeout - transient, retry recommended"
 
+    # Check for any ReadError by name (duck typing for different httpx versions)
+    # ReadError happens when connection is interrupted during file transfer
+    if type(exc).__name__ == "ReadError":
+        return True, "Connection interrupted during transfer - transient, retry recommended"
     # Check for our own validation errors (non-retriable)
     if isinstance(exc, ValidationError):
         return False, "Validation error - fix input parameters"
