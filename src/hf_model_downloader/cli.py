@@ -183,7 +183,7 @@ def download(
         help="Force config endpoint, ignore HF_ENDPOINT env var",
     ),
     output: str | None = typer.Option(
-        None, "--output", "-o", help="Output/cache directory"
+        None, "--output", "-o", help="Output dir (exports with real filenames)"
     ),
     allow_pattern: list[str] = typer.Option(
         [], "--allow-pattern", help="File patterns to include (can use multiple times)"
@@ -227,7 +227,6 @@ def download(
     settings = load_settings(
         endpoint=endpoint,
         force_endpoint=force_endpoint,
-        cache_dir=output,
         max_workers=max_workers,
     )
 
@@ -303,7 +302,7 @@ def download(
             repo_id=repo_id,
             revision=revision,
             repo_type=repo_type,
-            cache_dir=output,
+            local_dir=output,
             force_download=force_download,
             force_endpoint=force_endpoint,
             token=token,

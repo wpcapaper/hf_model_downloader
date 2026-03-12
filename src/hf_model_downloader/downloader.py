@@ -57,6 +57,7 @@ def download_snapshot(
     revision: str = "main",
     repo_type: str = "model",
     cache_dir: str | Path | None = None,
+    local_dir: str | Path | None = None,
     force_download: bool = False,
     token: str | None = None,
     settings: Settings | None = None,
@@ -73,7 +74,8 @@ def download_snapshot(
         repo_id: HuggingFace repository ID (e.g., 'bert-base-uncased')
         revision: Model revision/branch/tag
         repo_type: Repository type ('model', 'dataset', or 'space')
-        cache_dir: Cache directory (None = platform default)
+        cache_dir: Cache directory (None = platform default, uses blob storage)
+        local_dir: Local directory to export files to (uses real filenames, not blob storage)
         force_download: Force re-download even if cached
         token: HuggingFace API token (None = use HF_TOKEN env var)
         settings: Application settings (loaded if None)
@@ -88,6 +90,8 @@ def download_snapshot(
         DownloadError: If download fails after all retries
         KeyboardInterrupt: If user interrupts with Ctrl+C
     """
+
+
     global _interrupted
     _interrupted = False
 
@@ -119,6 +123,9 @@ def download_snapshot(
 
         if cache_dir is not None:
             download_kwargs["cache_dir"] = str(cache_dir)
+        if local_dir is not None:
+            download_kwargs["local_dir"] = str(local_dir)
+            download_kwargs["local_dir_use_symlinks"] = False  # Copy files, don't symlink
         if allow_patterns is not None:
             download_kwargs["allow_patterns"] = allow_patterns
         if ignore_patterns is not None:
