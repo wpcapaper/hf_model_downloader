@@ -1,3 +1,5 @@
+English | [简体中文](./README_CN.md)
+
 # HuggingFace Model Downloader (hfmdl)
 
 A command line tool for downloading models, datasets, and spaces from HuggingFace Hub with automatic retry logic and mirror support.
